@@ -26,6 +26,7 @@
     <packaging>jar</packaging>
 
     <dependencies>
+        <!-- Normal Dependencies -->
         <dependency>
             <groupId>org.apache.nifi</groupId>
             <artifactId>nifi-api</artifactId>
@@ -37,14 +38,16 @@
         </dependency>
         <dependency>
             <groupId>net.sf.sevenzipjbinding</groupId>
-            <artifactId>sevenzipjbinding</artifactId>
+            <artifactId>sevenzipjbinding-all-platforms</artifactId>
             <version>16.02-2.01</version>
         </dependency>
         <dependency>
             <groupId>net.sf.sevenzipjbinding</groupId>
-            <artifactId>sevenzipjbinding-all-platforms</artifactId>
+            <artifactId>sevenzipjbinding</artifactId>
             <version>16.02-2.01</version>
         </dependency>
+
+        <!-- Test Depencencies -->
         <dependency>
             <groupId>org.apache.nifi</groupId>
             <artifactId>nifi-mock</artifactId>
