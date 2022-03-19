@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.scraawl.nifi.processors.sevenzip;
+package co.zeroae.nifi.processors.sevenzip;
 
 import net.sf.sevenzipjbinding.*;
 import net.sf.sevenzipjbinding.simple.ISimpleInArchive;
@@ -150,8 +150,7 @@ public class UnpackContent extends AbstractProcessor {
             }
 
             // Fragment Attributes
-            finishFragmentAttributes(session, flowFile, unpacked);
-            final String fragmentId = unpacked.size() > 0 ? unpacked.get(0).getAttribute(FRAGMENT_ID) : null;
+            final String fragmentId = finishFragmentAttributes(session, flowFile, unpacked);
             flowFile = FragmentAttributes.copyAttributesToOriginal(session, flowFile, fragmentId, unpacked.size());
 
             // Transfer
@@ -209,15 +208,12 @@ public class UnpackContent extends AbstractProcessor {
 
                     session.write(unpackedFile, outputStream -> {
                         // TODO: Use the extractCallBack because item by item is Slow
-                        ExtractOperationResult result = item.extractSlow(new ISequentialOutStream() {
-                            @Override
-                            public int write(byte[] data) throws SevenZipException {
-                                try {
-                                    outputStream.write(data);
-                                    return data.length;
-                                } catch (IOException e) {
-                                    throw new SevenZipException(e.getMessage(), e.getCause());
-                                }
+                        ExtractOperationResult result = item.extractSlow(data -> {
+                            try {
+                                outputStream.write(data);
+                                return data.length;
+                            } catch (IOException e) {
+                                throw new SevenZipException(e.getMessage(), e.getCause());
                             }
                         });
                         // TODO:  what to do if extract fails?

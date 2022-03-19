@@ -14,8 +14,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.scraawl.nifi.processors.sevenzip;
+package co.zeroae.nifi.processors.sevenzip;
 
+import co.zeroae.nifi.processors.sevenzip.UnpackContent;
 import org.apache.nifi.util.MockFlowFile;
 import org.apache.nifi.util.TestRunner;
 import org.apache.nifi.util.TestRunners;

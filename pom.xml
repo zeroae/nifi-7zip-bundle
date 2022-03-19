@@ -22,8 +22,8 @@
         <version>1.15.3</version>
     </parent>
 
-    <groupId>com.scraawl.nifi</groupId>
-    <artifactId>sevenzip-processor</artifactId>
+    <groupId>co.zeroae.nifi</groupId>
+    <artifactId>nifi-7zip-bundle</artifactId>
     <version>1.0</version>
     <packaging>pom</packaging>
 
