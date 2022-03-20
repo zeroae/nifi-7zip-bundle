@@ -17,8 +17,6 @@
 package co.zeroae.nifi.processors.sevenzip;
 
 import net.sf.sevenzipjbinding.*;
-import net.sf.sevenzipjbinding.simple.ISimpleInArchive;
-import net.sf.sevenzipjbinding.simple.ISimpleInArchiveItem;
 import org.apache.nifi.annotation.lifecycle.OnAdded;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.flowfile.FlowFile;
@@ -44,6 +42,7 @@ import java.nio.file.Path;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.List;
 
 @Tags({"7zip", "zip", "tar", "split", "lzma", "iso"})
 @CapabilityDescription("Provide a description")
@@ -145,12 +144,8 @@ public class UnpackContent extends AbstractProcessor {
         // Code largely inspired by UnpackContent.java
         // https://github.com/apache/nifi/blob/main/nifi-nar-bundles/nifi-standard-bundle/nifi-standard-processors/src/main/java/org/apache/nifi/processors/standard/UnpackContent.java
         ComponentLog logger = getLogger();
-        FlowFile flowFile = session.get();
-        if ( flowFile == null ) {
-            return;
-        }
 
-        ArchiveFormat archiveFormat;
+        final ArchiveFormat archiveFormat;
         switch (context.getProperty(ARCHIVE_FORMAT).getValue()) {
             case ARCHIVE_FORMAT_AUTO:
                 archiveFormat= null;
@@ -169,126 +164,31 @@ public class UnpackContent extends AbstractProcessor {
                 break;
         }
 
-        final List<FlowFile> unpacked = new ArrayList<>();
-        try {
-            unpack(session, flowFile, unpacked, archiveFormat);
-            if (unpacked.isEmpty()) {
-                logger.error("Unable to unpack {} because it does not appear to have any entries; routing to failure", flowFile);
-                session.transfer(flowFile, REL_FAILURE);
-                return;
-            }
-
-            // Fragment Attributes
-            final String fragmentId = finishFragmentAttributes(session, flowFile, unpacked);
-            flowFile = FragmentAttributes.copyAttributesToOriginal(session, flowFile, fragmentId, unpacked.size());
-
-            // Transfer
-            session.transfer(unpacked, REL_SUCCESS);
-            session.transfer(flowFile, REL_ORIGINAL);
-            session.getProvenanceReporter().fork(flowFile, unpacked);
-            logger.info("Unpacked {} into {} and transferred to success", flowFile, unpacked);
-        } catch (Exception e) {
-            logger.error("Unable to unpack {}; routing to failure", flowFile, e);
-            session.transfer(flowFile, REL_FAILURE);
-            session.remove(unpacked);
-        }
+        final FlowFileExtractor extractor = new FlowFileExtractor(getLogger(), session, archiveFormat);
+        extractor.extract();
     }
 
-    private void unpack(ProcessSession session, FlowFile sourceFlowFile, List<FlowFile> unpacked, ArchiveFormat archiveFormat) throws IOException {
-        // http://sevenzipjbind.sourceforge.net/extraction_snippets.html
-        try (SevenZipInputStream inputStream = new SevenZipInputStream(session, sourceFlowFile)) {
-            IInArchive inArchive = SevenZip.openInArchive(archiveFormat, inputStream);
-            ISimpleInArchive iSimpleInArchive = inArchive.getSimpleInterface();
-
-            for (ISimpleInArchiveItem item : iSimpleInArchive.getArchiveItems()) {
-                if (item.isFolder())
-                    continue;
-                FlowFile unpackedFile = session.create(sourceFlowFile);
-                try {
-                    unpackedFile = session.putAllAttributes(unpackedFile, getFileAttributes(sourceFlowFile, item));
-                    session.write(unpackedFile, outputStream -> {
-                        // TODO: Use the extractCallBack because item by item is too Slow
-                        ExtractOperationResult result = item.extractSlow(data -> {
-                            try {
-                                outputStream.write(data);
-                                return data.length;
-                            } catch (IOException e) {
-                                throw new SevenZipException(e.getMessage(), e.getCause());
-                            }
-                        });
-                        // TODO:  what to do if extract fails? Do we skip the file or route all to failure?
-                        assert (result == ExtractOperationResult.OK);
-                    });
-                } finally {
-                    unpacked.add(unpackedFile);
-                }
-            }
-        }
-    }
-
-    private Map<String, String> getFileAttributes(FlowFile parent, ISimpleInArchiveItem item) throws SevenZipException {
-        final Map<String, String> attributes = new HashMap<>();
-
-        final File file;
-        if (item.getPath() == null || item.getPath().isEmpty()) {
-            // Drop the extension from the parent and call it a day...
-            String parentFileName = parent.getAttribute(CoreAttributes.FILENAME.key());
-            file = new File(parentFileName.substring(0, parentFileName.lastIndexOf('.')));
-        } else {
-            file = new File(item.getPath());
-        }
-        final Path filePath = file.toPath();
-        final String filePathString = filePath.getParent() == null ? "/" : filePath.getParent() + "/";
-        final Path absFilePath = filePath.toAbsolutePath();
-        final String absPathString = absFilePath.getParent().toString() + "/";
-
-        attributes.put(CoreAttributes.FILENAME.key(), filePath.toString());
-        attributes.put(CoreAttributes.PATH.key(), filePathString);
-        attributes.put(CoreAttributes.ABSOLUTE_PATH.key(), absPathString);
-
-        attributes.put(CoreAttributes.MIME_TYPE.key(), OCTET_STREAM);
-
-        if (item.getUser() != null && !item.getUser().isEmpty())
-            attributes.put(FILE_OWNER_ATTRIBUTE, item.getUser());
-        if (item.getGroup() != null && !item.getUser().isEmpty())
-            attributes.put(FILE_GROUP_ATTRIBUTE, item.getGroup());
-        // TODO: FileInfo lives in nifi.standard.processors, we need to figure out how to import it.
-        // attributes.put(FILE_PERMISSIONS_ATTRIBUTE, FileInfo.permissionToString(item.getAttributes()));
-        if (item.getCreationTime() != null)
-            attributes.put(FILE_CREATION_TIME_ATTRIBUTE, DATE_TIME_FORMATTER.format(item.getCreationTime().toInstant()));
-        if (item.getLastWriteTime() != null)
-            attributes.put(FILE_LAST_MODIFIED_TIME_ATTRIBUTE, DATE_TIME_FORMATTER.format(item.getLastWriteTime().toInstant()));
-        return attributes;
-    }
 
     /**
-     * Apply split index, count and other attributes.
+     * Apply split index and count attributes.
      *
      * @param session session
-     * @param source source
      * @param splits splits
-     * @return generated fragment identifier for the splits
      */
-    private String finishFragmentAttributes(final ProcessSession session, final FlowFile source, final List<FlowFile> splits) {
-        final String originalFilename = source.getAttribute(CoreAttributes.FILENAME.key());
-
-        final String fragmentId = UUID.randomUUID().toString();
+    private void finishFragmentAttributes(final ProcessSession session, final List<FlowFile> splits) {
         final ArrayList<FlowFile> newList = new ArrayList<>(splits);
         splits.clear();
         for (int i = 1; i <= newList.size(); i++) {
             FlowFile ff = newList.get(i - 1);
             final Map<String, String> attributes = new HashMap<>();
-            attributes.put(FRAGMENT_ID, fragmentId);
             attributes.put(FRAGMENT_INDEX, String.valueOf(i));
             attributes.put(FRAGMENT_COUNT, String.valueOf(newList.size()));
-            attributes.put(SEGMENT_ORIGINAL_FILENAME, originalFilename);
             FlowFile newFF = session.putAllAttributes(ff, attributes);
             splits.add(newFF);
         }
-        return fragmentId;
     }
 
-    static private class SevenZipInputStream implements IInStream {
+    static private class FlowFileInStream implements IInStream {
         final ProcessSession session;
         final FlowFile flowFile;
         final long currentStreamSize;
@@ -296,7 +196,7 @@ public class UnpackContent extends AbstractProcessor {
         InputStream currentInputStream;
         long currentPosition;
 
-        public SevenZipInputStream(ProcessSession session, FlowFile flowFile) {
+        public FlowFileInStream(ProcessSession session, FlowFile flowFile) {
             this.session = session;
             this.flowFile = flowFile;
             this.currentStreamSize = flowFile.getSize();
@@ -356,6 +256,197 @@ public class UnpackContent extends AbstractProcessor {
                 currentInputStream.close();
                 currentInputStream = null;
                 currentPosition = Long.MAX_VALUE;
+            }
+        }
+    }
+
+    private class FlowFileExtractor implements IArchiveExtractCallback, Closeable {
+        private final ComponentLog logger;
+        private final ProcessSession session;
+        private final ArchiveFormat archiveFormat;
+
+        private final ArrayList<FlowFile> outFlowFiles;
+
+        private FlowFile inFlowFile;
+        private IInArchive inArchive;
+        private String fragmentId;
+        private int index;
+        private long total;
+
+        private boolean skipExtract;
+        private FlowFile outFlowFile;
+        private OutputStream outputStream;
+
+
+        public FlowFileExtractor(ComponentLog logger, ProcessSession session, ArchiveFormat archiveFormat) {
+            this.logger = logger;
+            this.session = session;
+            this.archiveFormat = archiveFormat;
+
+            this.outFlowFiles = new ArrayList<>();
+        }
+
+        public void extract() {
+            outFlowFiles.clear();
+
+            inFlowFile = session.get();
+            if (inFlowFile == null)
+                return;
+
+            fragmentId = UUID.randomUUID().toString();
+            try (FlowFileInStream inputStream = new FlowFileInStream(session, inFlowFile)) {
+                try (IInArchive archive = SevenZip.openInArchive(archiveFormat, inputStream)) {
+                    // A little weird, but needed since inArchive is used during the callback.
+                    this.inArchive = archive;
+                    inArchive.extract(null, false, this);
+
+                    if (outFlowFiles.isEmpty())
+                        throw new IOException("No entries in " + inFlowFile);
+
+                    finishFragmentAttributes(session, outFlowFiles);
+
+                    session.transfer(outFlowFiles, REL_SUCCESS);
+                } finally {
+                    inArchive = null;
+                }
+            } catch (IOException e) {
+                logger.error("Unable to unpack {}; transferred to failure relationship.", inFlowFile, e);
+                session.remove(this.outFlowFiles);
+                session.transfer(inFlowFile, REL_FAILURE);
+                this.outFlowFiles.clear();
+                return;
+            }
+
+            inFlowFile = FragmentAttributes.copyAttributesToOriginal(session, inFlowFile, fragmentId, outFlowFiles.size());
+            session.transfer(inFlowFile, REL_ORIGINAL);
+            logger.info("Unpacked {} into {} and transferred to success", inFlowFile, outFlowFiles);
+        }
+
+        @Override
+        public ISequentialOutStream getStream(int index, ExtractAskMode extractAskMode) throws SevenZipException {
+            this.index = index;
+            skipExtract = (boolean) inArchive.getProperty(index, PropID.IS_FOLDER);
+            if (skipExtract || extractAskMode != ExtractAskMode.EXTRACT)
+                return null;
+
+            outFlowFile = createOutFlowFile();
+            outputStream = session.write(outFlowFile);
+
+            return data -> {
+                try {
+                    outputStream.write(data);
+                    return data.length;
+                } catch (IOException e) {
+                    throw new SevenZipException(e.getMessage(), e.getCause());
+                }
+            };
+        }
+
+        @Override
+        public void prepareOperation(ExtractAskMode extractAskMode) {
+            logger.debug("Prepare to {} {}", extractAskMode, outFlowFile);
+        }
+
+        @Override
+        public void setOperationResult(ExtractOperationResult extractOperationResult) throws SevenZipException {
+            if (skipExtract)
+                return;
+            logger.debug("{} operation result: {}", outFlowFile, extractOperationResult);
+
+            try {
+                close();
+            } catch (IOException e) {
+                extractOperationResult = ExtractOperationResult.UNKNOWN_OPERATION_RESULT;
+                throw new SevenZipException(e.getMessage(), e.getCause());
+            } finally {
+                if (extractOperationResult == ExtractOperationResult.OK)
+                    outFlowFiles.add(outFlowFile);
+                else {
+                    // TODO: What to do when it fails?
+                    //       1 - Cancel entire operation, route original to failure ?
+                    //       2 - Continue with extraction ?
+                    session.remove(outFlowFile);
+                }
+                outFlowFile = null;
+            }
+        }
+
+        private FlowFile createOutFlowFile() throws SevenZipException {
+            // TODO: This is all ugly, refactor if possible
+
+            FlowFile rv = session.create(inFlowFile);
+            final Map<String, String> attributes = new HashMap<>();
+
+            // Step zero,
+            final String originalFilename = inFlowFile.getAttribute(CoreAttributes.FILENAME.key());
+            attributes.put(FRAGMENT_ID, fragmentId);
+            attributes.put(SEGMENT_ORIGINAL_FILENAME, originalFilename);
+
+            // Step one, set the mime.type to OCTET_STREAM
+            attributes.put(CoreAttributes.MIME_TYPE.key(), OCTET_STREAM);
+
+            // Step two: Fill in the Filename/Path/Absolute Path
+            // TODO: convert tgz -> tar, taz -> tar, tbz2 -> tar, etc IFF stringProperty is null or empty.
+            String stringProperty = (String) inArchive.getProperty(index, PropID.PATH);
+            final File file = new File(
+                    !(stringProperty == null || stringProperty.isEmpty())
+                            ? stringProperty
+                            : originalFilename.substring(0, originalFilename.lastIndexOf('.'))
+            );
+
+            final Path filePath = file.toPath();
+            attributes.put(CoreAttributes.FILENAME.key(), filePath.toString());
+
+            final String filePathString = filePath.getParent() == null ? "/" : filePath.getParent() + "/";
+            attributes.put(CoreAttributes.PATH.key(), filePathString);
+
+            final Path absFilePath = filePath.toAbsolutePath();
+            final String absPathString = absFilePath.getParent().toString() + "/";
+            attributes.put(CoreAttributes.ABSOLUTE_PATH.key(), absPathString);
+
+            // Step three: USER, GROUP, Dates and Times
+            stringProperty = (String) inArchive.getProperty(index, PropID.USER);
+            if (stringProperty != null && !stringProperty.isEmpty())
+                attributes.put(FILE_OWNER_ATTRIBUTE, stringProperty);
+
+            stringProperty = (String) inArchive.getProperty(index, PropID.GROUP);
+            if (stringProperty != null && !stringProperty.isEmpty())
+                attributes.put(FILE_GROUP_ATTRIBUTE, stringProperty);
+
+            // TODO: FileInfo lives in nifi.standard.processors, we need to figure out how to import it.
+            // attributes.put(FILE_PERMISSIONS_ATTRIBUTE, FileInfo.permissionToString(item.getAttributes()));
+
+            Date dateProperty = (Date) inArchive.getProperty(index, PropID.CREATION_TIME);
+            if (dateProperty != null)
+                attributes.put(FILE_CREATION_TIME_ATTRIBUTE, DATE_TIME_FORMATTER.format(dateProperty.toInstant()));
+
+            dateProperty = (Date) inArchive.getProperty(index, PropID.LAST_MODIFICATION_TIME);
+            if (dateProperty != null)
+                attributes.put(FILE_LAST_MODIFIED_TIME_ATTRIBUTE, DATE_TIME_FORMATTER.format(dateProperty.toInstant()));
+
+            return session.putAllAttributes(rv, attributes);
+        }
+
+        @Override
+        public void setTotal(long total) {
+            // Total in Bytes
+            this.total = total;
+        }
+
+        @Override
+        public void setCompleted(long complete) {
+            // Complete in Bytes
+            logger.debug("[{}/{}] completed...", complete, total);
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (outputStream != null) {
+                try {
+                    outputStream.close();
+                } finally {
+                    outputStream = null;
+                }
             }
         }
     }

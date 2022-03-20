@@ -16,7 +16,6 @@
  */
 package co.zeroae.nifi.processors.sevenzip;
 
-import co.zeroae.nifi.processors.sevenzip.UnpackContent;
 import org.apache.nifi.util.MockFlowFile;
 import org.apache.nifi.util.TestRunner;
 import org.apache.nifi.util.TestRunners;
