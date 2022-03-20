@@ -57,9 +57,10 @@ public class UnpackContentTest {
     @Parameterized.Parameters
     public static Collection inputFiles() {
         return Arrays.asList(new Object[][] {
+                {"simple.txt.gz", 1},
+                {"simple.zip", 3},
                 {"simple.7z", 4},
                 {"simple.iso", 2},
-                {"simple.zip", 3},
         });
     }
 
