@@ -86,10 +86,11 @@ public class Unpack7ZipContent extends AbstractProcessor {
             .build();
     public static final Relationship REL_ORIGINAL = new Relationship.Builder()
             .name("original")
+            .autoTerminateDefault(true)
             .description("The original FlowFile is sent to this relationship after it has been successfully unpacked")
             .build();
     public static final Relationship REL_EMPTY = new Relationship.Builder()
-            .name("empty_archive")
+            .name("empty")
             .autoTerminateDefault(true)
             .description("The original FlowFile is sent to this relationship if it is empty")
             .build();
