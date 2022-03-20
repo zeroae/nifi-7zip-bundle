@@ -46,4 +46,4 @@ services:
       - nifi_content:/opt/nifi/nifi-current/content_repository
       - nifi_provenance:/opt/nifi/nifi-current/provenance_repository
       - nifi_logs:/opt/nifi/nifi-current/logs
-      - ./nifi-7zip-nar/target/nifi-7zip-nar-1.0-SNAPSHOT.nar:/opt/nifi/nifi-current/extensions/nifi-7zip-nar-1.0-SNAPSHOT.nar
+      - ./nifi-7zip-nar/target:/opt/nifi/nifi-current/extensions
