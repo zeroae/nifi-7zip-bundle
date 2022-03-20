@@ -19,7 +19,6 @@ package co.zeroae.nifi.processors.sevenzip;
 import net.sf.sevenzipjbinding.*;
 import net.sf.sevenzipjbinding.simple.ISimpleInArchive;
 import net.sf.sevenzipjbinding.simple.ISimpleInArchiveItem;
-import net.sf.sevenzipjbinding.util.ByteArrayStream;
 import org.apache.nifi.annotation.lifecycle.OnAdded;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.flowfile.FlowFile;
@@ -40,7 +39,6 @@ import org.apache.nifi.processor.ProcessSession;
 import org.apache.nifi.processor.ProcessorInitializationContext;
 import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.util.StandardValidators;
-import org.apache.nifi.stream.io.StreamUtils;
 
 import java.io.*;
 import java.nio.file.Path;
@@ -165,49 +163,22 @@ public class UnpackContent extends AbstractProcessor {
         }
     }
 
-    private void unpack(ProcessSession session, FlowFile sourceFlowFile, List<FlowFile> unpacked) {
+    private void unpack(ProcessSession session, FlowFile sourceFlowFile, List<FlowFile> unpacked) throws IOException {
         // http://sevenzipjbind.sourceforge.net/extraction_snippets.html
-        session.read(sourceFlowFile, inputStream -> {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            StreamUtils.copy(inputStream, baos);
-            ByteArrayStream bas = new ByteArrayStream(baos.toByteArray(), false);
+        // # TODO: accept  mime.type or fixed type
 
-            IInArchive inArchive = SevenZip.openInArchive(null, bas);
-            ISimpleInArchive  iSimpleInArchive = inArchive.getSimpleInterface();
+        try (SevenZipInputStream inputStream = new SevenZipInputStream(session, sourceFlowFile)) {
+            IInArchive inArchive = SevenZip.openInArchive(null, inputStream);
+            ISimpleInArchive iSimpleInArchive = inArchive.getSimpleInterface();
 
-            for (ISimpleInArchiveItem item: iSimpleInArchive.getArchiveItems()) {
-                if (item.isFolder()) {
+            for (ISimpleInArchiveItem item : iSimpleInArchive.getArchiveItems()) {
+                if (item.isFolder())
                     continue;
-                }
                 FlowFile unpackedFile = session.create(sourceFlowFile);
-                final File file = new File(item.getPath());
-                final Path filePath = file.toPath();
-                final String filePathString = filePath.getParent() == null ? "/" : filePath.getParent() + "/";
-                final Path absFilePath = filePath.toAbsolutePath();
-                final String absPathString = absFilePath.getParent().toString() + "/";
-
                 try {
-                    final Map<String, String> attributes = new HashMap<>();
-                    attributes.put(CoreAttributes.FILENAME.key(), item.getPath());
-                    attributes.put(CoreAttributes.PATH.key(), filePathString);
-                    attributes.put(CoreAttributes.ABSOLUTE_PATH.key(), absPathString);
-                    attributes.put(CoreAttributes.MIME_TYPE.key(), OCTET_STREAM);
-
-                    if (item.getUser() != null)
-                        attributes.put(FILE_OWNER_ATTRIBUTE, item.getUser());
-                    if (item.getGroup() != null)
-                        attributes.put(FILE_GROUP_ATTRIBUTE, item.getGroup());
-                    // TODO: FileInfo lives in nifi.standard.processors, we need to figure out how to import it.
-                    // attributes.put(FILE_PERMISSIONS_ATTRIBUTE, FileInfo.permissionToString(item.getAttributes()));
-                    if (item.getCreationTime() != null)
-                        attributes.put(FILE_CREATION_TIME_ATTRIBUTE, DATE_TIME_FORMATTER.format(item.getCreationTime().toInstant()));
-                    if (item.getLastWriteTime() != null)
-                        attributes.put(FILE_LAST_MODIFIED_TIME_ATTRIBUTE, DATE_TIME_FORMATTER.format(item.getLastWriteTime().toInstant()));
-
-                    unpackedFile = session.putAllAttributes(unpackedFile, attributes);
-
+                    unpackedFile = session.putAllAttributes(unpackedFile, getFileAttributes(sourceFlowFile, item));
                     session.write(unpackedFile, outputStream -> {
-                        // TODO: Use the extractCallBack because item by item is Slow
+                        // TODO: Use the extractCallBack because item by item is too Slow
                         ExtractOperationResult result = item.extractSlow(data -> {
                             try {
                                 outputStream.write(data);
@@ -216,14 +187,49 @@ public class UnpackContent extends AbstractProcessor {
                                 throw new SevenZipException(e.getMessage(), e.getCause());
                             }
                         });
-                        // TODO:  what to do if extract fails?
-                        assert(result == ExtractOperationResult.OK);
+                        // TODO:  what to do if extract fails? Do we skip the file or route all to failure?
+                        assert (result == ExtractOperationResult.OK);
                     });
                 } finally {
                     unpacked.add(unpackedFile);
                 }
             }
-        });
+        }
+    }
+
+    private Map<String, String> getFileAttributes(FlowFile parent, ISimpleInArchiveItem item) throws SevenZipException {
+        final Map<String, String> attributes = new HashMap<>();
+
+        final File file;
+        if (item.getPath() == null || item.getPath().isEmpty()) {
+            // Drop the extension from the parent and call it a day...
+            String parentFileName = parent.getAttribute(CoreAttributes.FILENAME.key());
+            file = new File(parentFileName.substring(0, parentFileName.lastIndexOf('.')));
+        } else {
+            file = new File(item.getPath());
+        }
+        final Path filePath = file.toPath();
+        final String filePathString = filePath.getParent() == null ? "/" : filePath.getParent() + "/";
+        final Path absFilePath = filePath.toAbsolutePath();
+        final String absPathString = absFilePath.getParent().toString() + "/";
+
+        attributes.put(CoreAttributes.FILENAME.key(), filePath.toString());
+        attributes.put(CoreAttributes.PATH.key(), filePathString);
+        attributes.put(CoreAttributes.ABSOLUTE_PATH.key(), absPathString);
+
+        attributes.put(CoreAttributes.MIME_TYPE.key(), OCTET_STREAM);
+
+        if (item.getUser() != null && !item.getUser().isEmpty())
+            attributes.put(FILE_OWNER_ATTRIBUTE, item.getUser());
+        if (item.getGroup() != null && !item.getUser().isEmpty())
+            attributes.put(FILE_GROUP_ATTRIBUTE, item.getGroup());
+        // TODO: FileInfo lives in nifi.standard.processors, we need to figure out how to import it.
+        // attributes.put(FILE_PERMISSIONS_ATTRIBUTE, FileInfo.permissionToString(item.getAttributes()));
+        if (item.getCreationTime() != null)
+            attributes.put(FILE_CREATION_TIME_ATTRIBUTE, DATE_TIME_FORMATTER.format(item.getCreationTime().toInstant()));
+        if (item.getLastWriteTime() != null)
+            attributes.put(FILE_LAST_MODIFIED_TIME_ATTRIBUTE, DATE_TIME_FORMATTER.format(item.getLastWriteTime().toInstant()));
+        return attributes;
     }
 
     /**
@@ -251,5 +257,77 @@ public class UnpackContent extends AbstractProcessor {
             splits.add(newFF);
         }
         return fragmentId;
+    }
+
+    static private class SevenZipInputStream implements IInStream {
+        final ProcessSession session;
+        final FlowFile flowFile;
+        final long currentStreamSize;
+
+        InputStream currentInputStream;
+        long currentPosition;
+
+        public SevenZipInputStream(ProcessSession session, FlowFile flowFile) {
+            this.session = session;
+            this.flowFile = flowFile;
+            this.currentStreamSize = flowFile.getSize();
+
+            this.currentInputStream = this.session.read(this.flowFile);
+            this.currentPosition = 0;
+        }
+
+        private void resetInputStream() throws SevenZipException {
+            try {
+                close();
+            } catch (IOException e) {
+                throw new SevenZipException(e.getMessage(), e.getCause());
+            }
+            this.currentInputStream = this.session.read(this.flowFile);
+            this.currentPosition = 0;
+        }
+
+        @Override
+        synchronized
+        public long seek(long offset, int seekOrigin) throws SevenZipException {
+            long skipped;
+            try {
+                switch (seekOrigin) {
+                    case SEEK_SET:
+                        if (offset < currentPosition)
+                            resetInputStream();
+                        skipped = currentInputStream.skip(offset - currentPosition);
+                        currentPosition += skipped;
+                        return currentPosition;
+                    case SEEK_CUR:
+                        return seek(currentPosition + offset, SEEK_SET);
+                    case SEEK_END:
+                        return seek(currentStreamSize + offset, SEEK_SET);
+                }
+            } catch (IOException e) {
+                throw new SevenZipException(e.getMessage(), e.getCause());
+            }
+            return 0;
+        }
+
+        @Override
+        synchronized
+        public int read(byte[] data) throws SevenZipException {
+            try {
+                int read = this.currentInputStream.read(data);
+                currentPosition += read;
+                return read;
+            } catch (IOException e) {
+               throw new SevenZipException(e.getMessage(), e.getCause());
+            }
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (currentInputStream != null) {
+                currentInputStream.close();
+                currentInputStream = null;
+                currentPosition = Long.MAX_VALUE;
+            }
+        }
     }
 }
