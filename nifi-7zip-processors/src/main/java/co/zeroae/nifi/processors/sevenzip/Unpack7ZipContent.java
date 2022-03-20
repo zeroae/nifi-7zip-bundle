@@ -49,7 +49,7 @@ import java.util.List;
 @SeeAlso({})
 @ReadsAttributes({@ReadsAttribute(attribute="", description="")})
 @WritesAttributes({@WritesAttribute(attribute="", description="")})
-public class UnpackContent extends AbstractProcessor {
+public class Unpack7ZipContent extends AbstractProcessor {
 
     private static final String OCTET_STREAM = "application/octet-stream";
 
@@ -88,6 +88,11 @@ public class UnpackContent extends AbstractProcessor {
             .name("original")
             .description("The original FlowFile is sent to this relationship after it has been successfully unpacked")
             .build();
+    public static final Relationship REL_EMPTY = new Relationship.Builder()
+            .name("empty_archive")
+            .autoTerminateDefault(true)
+            .description("The original FlowFile is sent to this relationship if it is empty")
+            .build();
     public static final Relationship REL_FAILURE = new Relationship.Builder()
             .name("failure")
             .description("The original FlowFile is sent to this relationship when it cannot be unpacked for some reason")
@@ -115,6 +120,7 @@ public class UnpackContent extends AbstractProcessor {
         relationships = new HashSet<>();
         relationships.add(REL_SUCCESS);
         relationships.add(REL_FAILURE);
+        relationships.add(REL_EMPTY);
         relationships.add(REL_ORIGINAL);
         relationships = Collections.unmodifiableSet(relationships);
     }
@@ -299,12 +305,7 @@ public class UnpackContent extends AbstractProcessor {
                     // A little weird, but needed since inArchive is used during the callback.
                     this.inArchive = archive;
                     inArchive.extract(null, false, this);
-
-                    if (outFlowFiles.isEmpty())
-                        throw new IOException("No entries in " + inFlowFile);
-
                     finishFragmentAttributes(session, outFlowFiles);
-
                     session.transfer(outFlowFiles, REL_SUCCESS);
                 } finally {
                     inArchive = null;
@@ -318,8 +319,9 @@ public class UnpackContent extends AbstractProcessor {
             }
 
             inFlowFile = FragmentAttributes.copyAttributesToOriginal(session, inFlowFile, fragmentId, outFlowFiles.size());
-            session.transfer(inFlowFile, REL_ORIGINAL);
-            logger.info("Unpacked {} into {} and transferred to success", inFlowFile, outFlowFiles);
+            Relationship dest = outFlowFiles.isEmpty() ? REL_EMPTY : REL_ORIGINAL;
+            session.transfer(inFlowFile, dest);
+            logger.info("Unpacked {} into {} and transferred to {}", inFlowFile, outFlowFiles, dest);
         }
 
         @Override
