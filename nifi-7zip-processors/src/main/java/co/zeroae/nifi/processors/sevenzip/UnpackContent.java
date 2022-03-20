@@ -38,7 +38,6 @@ import org.apache.nifi.processor.ProcessContext;
 import org.apache.nifi.processor.ProcessSession;
 import org.apache.nifi.processor.ProcessorInitializationContext;
 import org.apache.nifi.processor.Relationship;
-import org.apache.nifi.processor.util.StandardValidators;
 
 import java.io.*;
 import java.nio.file.Path;
@@ -60,6 +59,9 @@ public class UnpackContent extends AbstractProcessor {
     public static final String FRAGMENT_COUNT = FragmentAttributes.FRAGMENT_COUNT.key();
     public static final String SEGMENT_ORIGINAL_FILENAME = FragmentAttributes.SEGMENT_ORIGINAL_FILENAME.key();
 
+    public static final String ARCHIVE_FORMAT_AUTO = "auto detect";
+    public static final String ARCHIVE_FORMAT_MIME_TYPE = "use mime.type";
+
     public static final String FILE_LAST_MODIFIED_TIME_ATTRIBUTE = "file.lastModifiedTime";
     public static final String FILE_CREATION_TIME_ATTRIBUTE = "file.creationTime";
     public static final String FILE_OWNER_ATTRIBUTE = "file.owner";
@@ -70,12 +72,13 @@ public class UnpackContent extends AbstractProcessor {
     public static final String FILE_MODIFIED_DATE_ATTR_FORMAT = "yyyy-MM-dd'T'HH:mm:ssZ";
     public static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern(FILE_MODIFIED_DATE_ATTR_FORMAT).withZone(ZoneId.systemDefault());
 
-    public static final PropertyDescriptor MY_PROPERTY = new PropertyDescriptor
-            .Builder().name("MY_PROPERTY")
-            .displayName("My property")
-            .description("Example Property")
-            .required(false)
-            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+    public static final PropertyDescriptor ARCHIVE_FORMAT = new PropertyDescriptor.Builder()
+            .name("ARCHIVE_FORMAT")
+            .displayName("Archive Format")
+            .description("The Archive Format used to create the file.")
+            .required(true)
+            .allowableValues(getArchiveFormats())
+            .defaultValue(ARCHIVE_FORMAT_AUTO)
             .build();
 
     public static final Relationship REL_SUCCESS = new Relationship.Builder()
@@ -95,10 +98,19 @@ public class UnpackContent extends AbstractProcessor {
 
     private Set<Relationship> relationships;
 
+    static String[] getArchiveFormats() {
+        ArrayList<String> rv = new ArrayList<>();
+        rv.add(ARCHIVE_FORMAT_AUTO);
+        for (ArchiveFormat format : ArchiveFormat.values()) {
+            rv.add(format.name().toLowerCase(Locale.ROOT));
+        }
+        return rv.toArray(new String[0]);
+    }
+
     @Override
     protected void init(final ProcessorInitializationContext context) {
         descriptors = new ArrayList<>();
-        descriptors.add(MY_PROPERTY);
+        descriptors.add(ARCHIVE_FORMAT);
         descriptors = Collections.unmodifiableList(descriptors);
 
         relationships = new HashSet<>();
@@ -138,9 +150,28 @@ public class UnpackContent extends AbstractProcessor {
             return;
         }
 
+        ArchiveFormat archiveFormat;
+        switch (context.getProperty(ARCHIVE_FORMAT).getValue()) {
+            case ARCHIVE_FORMAT_AUTO:
+                archiveFormat= null;
+                break;
+            case ARCHIVE_FORMAT_MIME_TYPE:
+                // TODO: Implement mime.type to ARCHIVE_FORMAT conversion
+                archiveFormat= null;
+                logger.warn("mime.type to archive format is not implemented yet. Reverting to auto.");
+                break;
+            default:
+                archiveFormat= ArchiveFormat.valueOf(context
+                        .getProperty(ARCHIVE_FORMAT)
+                        .getValue()
+                        .toUpperCase(Locale.ROOT)
+                );
+                break;
+        }
+
         final List<FlowFile> unpacked = new ArrayList<>();
         try {
-            unpack(session, flowFile, unpacked);
+            unpack(session, flowFile, unpacked, archiveFormat);
             if (unpacked.isEmpty()) {
                 logger.error("Unable to unpack {} because it does not appear to have any entries; routing to failure", flowFile);
                 session.transfer(flowFile, REL_FAILURE);
@@ -163,12 +194,10 @@ public class UnpackContent extends AbstractProcessor {
         }
     }
 
-    private void unpack(ProcessSession session, FlowFile sourceFlowFile, List<FlowFile> unpacked) throws IOException {
+    private void unpack(ProcessSession session, FlowFile sourceFlowFile, List<FlowFile> unpacked, ArchiveFormat archiveFormat) throws IOException {
         // http://sevenzipjbind.sourceforge.net/extraction_snippets.html
-        // # TODO: accept  mime.type or fixed type
-
         try (SevenZipInputStream inputStream = new SevenZipInputStream(session, sourceFlowFile)) {
-            IInArchive inArchive = SevenZip.openInArchive(null, inputStream);
+            IInArchive inArchive = SevenZip.openInArchive(archiveFormat, inputStream);
             ISimpleInArchive iSimpleInArchive = inArchive.getSimpleInterface();
 
             for (ISimpleInArchiveItem item : iSimpleInArchive.getArchiveItems()) {
