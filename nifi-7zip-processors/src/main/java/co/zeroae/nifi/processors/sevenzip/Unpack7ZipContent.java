@@ -225,14 +225,25 @@ public class Unpack7ZipContent extends AbstractProcessor {
         @Override
         synchronized
         public long seek(long offset, int seekOrigin) throws SevenZipException {
-            long skipped;
             try {
                 switch (seekOrigin) {
                     case SEEK_SET:
                         if (offset < currentPosition)
                             resetInputStream();
-                        skipped = currentInputStream.skip(offset - currentPosition);
-                        currentPosition += skipped;
+                        // NOTE: This is the code in Java 12 skipNBytes
+                        long n = offset - currentPosition;
+                        while (n > 0) {
+                            long ns = currentInputStream.skip(n);
+                            if (ns > 0 && ns <= n)
+                                n -= ns;
+                            else if (ns == 0) {
+                                if (currentInputStream.read() == -1)
+                                    throw new EOFException();
+                                n--;
+                            } else // negative skip or too many bytes
+                                throw new IOException("Unable to skip exactly");
+                        }
+                        currentPosition = offset;
                         return currentPosition;
                     case SEEK_CUR:
                         return seek(currentPosition + offset, SEEK_SET);

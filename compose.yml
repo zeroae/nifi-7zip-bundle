@@ -34,8 +34,12 @@ services:
     image: apache/nifi:1.13.2
     ports:
       - 9090:8080 # Unsecured HTTP Web Port
+      - 8000:8000 # JVM Debugger
     environment:
       NIFI_WEB_HTTP_PORT: 8080
+      NIFI_JVM_DEBUGGER: true
+    healthcheck:
+      test: /opt/nifi/nifi-current/bin/nifi.sh status
     networks:
       - nifi
     volumes:
