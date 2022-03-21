@@ -33,7 +33,7 @@ import java.util.Collection;
 
 
 @RunWith(Parameterized.class)
-public class UnpackContentTest {
+public class Unpack7ZipContentTest {
     // Inspired by TestUnpackContent
     // https://github.com/apache/nifi/blob/main/nifi-nar-bundles/nifi-standard-bundle/nifi-standard-processors/src/test/java/org/apache/nifi/processors/standard/TestUnpackContent.java
     private static final Path dataPath = Paths.get("src/test/resources");
@@ -45,10 +45,10 @@ public class UnpackContentTest {
 
     @Before
     public void init() {
-        testRunner = TestRunners.newTestRunner(UnpackContent.class);
+        testRunner = TestRunners.newTestRunner(Unpack7ZipContent.class);
     }
 
-    public UnpackContentTest(String fileName, Integer expectedFileCount) {
+    public Unpack7ZipContentTest(String fileName, Integer expectedFileCount) {
         this.fileName = fileName;
         this.expectedFileCount = expectedFileCount;
     }
@@ -72,10 +72,10 @@ public class UnpackContentTest {
         testRunner.run();
 
         //Assert
-        testRunner.assertTransferCount(UnpackContent.REL_ORIGINAL, 1);
-        testRunner.assertTransferCount(UnpackContent.REL_SUCCESS, this.expectedFileCount);
+        testRunner.assertTransferCount(Unpack7ZipContent.REL_ORIGINAL, 1);
+        testRunner.assertTransferCount(Unpack7ZipContent.REL_SUCCESS, this.expectedFileCount);
 
-        final MockFlowFile original = testRunner.getFlowFilesForRelationship(UnpackContent.REL_ORIGINAL).get(0);
-        final MockFlowFile flowFile = testRunner.getFlowFilesForRelationship(UnpackContent.REL_SUCCESS).get(0);
+        final MockFlowFile original = testRunner.getFlowFilesForRelationship(Unpack7ZipContent.REL_ORIGINAL).get(0);
+        final MockFlowFile flowFile = testRunner.getFlowFilesForRelationship(Unpack7ZipContent.REL_SUCCESS).get(0);
     }
 }
