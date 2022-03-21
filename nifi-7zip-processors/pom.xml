@@ -19,12 +19,12 @@
     <parent>
         <groupId>co.zeroae.nifi</groupId>
         <artifactId>nifi-7zip-bundle</artifactId>
-        <version>1.0-SNAPSHOT</version>
+        <version>0</version>
     </parent>
 
     <artifactId>nifi-7zip-processors</artifactId>
     <packaging>jar</packaging>
-    <version>1.0-SNAPSHOT</version>
+    <version>0</version>
 
     <dependencies>
         <!-- Normal Dependencies -->
