@@ -401,7 +401,7 @@ public class Unpack7ZipContent extends AbstractProcessor {
 
             // Step two: Fill in the Filename/Path/Absolute Path
             // TODO: convert tgz -> tar, taz -> tar, tbz2 -> tar, etc IFF stringProperty is null or empty.
-            String stringProperty = (String) inArchive.getProperty(index, PropID.PATH);
+            String stringProperty = inArchive.getStringProperty(index, PropID.PATH);
             final File file = new File(
                     !(stringProperty == null || stringProperty.isEmpty())
                             ? stringProperty
@@ -419,11 +419,11 @@ public class Unpack7ZipContent extends AbstractProcessor {
             attributes.put(CoreAttributes.ABSOLUTE_PATH.key(), absPathString);
 
             // Step three: USER, GROUP, Dates and Times
-            stringProperty = (String) inArchive.getProperty(index, PropID.USER);
+            stringProperty = inArchive.getStringProperty(index, PropID.USER);
             if (stringProperty != null && !stringProperty.isEmpty())
                 attributes.put(FILE_OWNER_ATTRIBUTE, stringProperty);
 
-            stringProperty = (String) inArchive.getProperty(index, PropID.GROUP);
+            stringProperty = inArchive.getStringProperty(index, PropID.GROUP);
             if (stringProperty != null && !stringProperty.isEmpty())
                 attributes.put(FILE_GROUP_ATTRIBUTE, stringProperty);
 
