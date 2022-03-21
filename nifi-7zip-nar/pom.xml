@@ -34,7 +34,7 @@
         <dependency>
             <groupId>co.zeroae.nifi</groupId>
             <artifactId>nifi-7zip-processors</artifactId>
-            <version>${version}</version>
+            <version>${project.version}</version>
         </dependency>
     </dependencies>
 
