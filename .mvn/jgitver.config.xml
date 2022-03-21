@@ -5,18 +5,19 @@
     <policy>NEAREST</policy>
     <autoIncrementPatch>true</autoIncrementPatch>
     <!--
-    <useDirty>true/false</useDirty>
+    <useDirty>true</useDirty>
     <useGitCommitId>true</useGitCommitId>
     <useCommitDistance>true</useCommitDistance>
     <gitCommitIdLength>8</gitCommitIdLength>
     -->
     <nonQualifierBranches>main,master</nonQualifierBranches>
-    <useDefaultBranchingPolicy>true</useDefaultBranchingPolicy>
-    <!--
-    <regexVersionTag>r([0-9]+)</regexVersionTag>
     <exclusions>
-        <exclusion>relative directory path</exclusion>
+        <exclusion>./.mvn</exclusion>
     </exclusions>
+    <!--
+    <useDefaultBranchingPolicy>true</useDefaultBranchingPolicy>
+    <regexVersionTag>r([0-9]+)</regexVersionTag>
+
     <branchPolicies>
         <branchPolicy>
             <pattern>pattern</pattern>
